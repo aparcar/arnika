@@ -106,20 +106,28 @@ func tcpClient(url, data string) error {
 	if data == "" {
 		return fmt.Errorf("data is empty")
 	}
-	c, err := net.DialTimeout("tcp", url, time.Millisecond*100)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if c != nil {
-			c.Close()
+
+	for {
+		c, err := net.DialTimeout("tcp", url, time.Millisecond*100)
+		if err != nil {
+			log.Printf("Failed to connect to %s: %v. Retrying in 1s...", url, err)
+			time.Sleep(1 * time.Second)
+			continue
 		}
-	}()
-	_, err = c.Write([]byte(data + "\n"))
-	if err != nil {
-		return err
+
+		// Connection successful
+		defer func() {
+			if c != nil {
+				c.Close()
+			}
+		}()
+
+		_, err = c.Write([]byte(data + "\n"))
+		if err != nil {
+			return err
+		}
+		return c.SetDeadline(time.Now().Add(time.Millisecond * 100))
 	}
-	return c.SetDeadline(time.Now().Add(time.Millisecond * 100))
 }
 
 func getPQCKey(pqcKeyFile string) (string, error) {

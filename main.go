@@ -106,7 +106,7 @@ func tcpClient(url, data string) error {
 	if data == "" {
 		return fmt.Errorf("data is empty")
 	}
-	c, err := net.DialTimeout("tcp", url, time.Millisecond*100)
+	c, err := net.DialTimeout("tcp", url, time.Second*10)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func tcpClient(url, data string) error {
 	if err != nil {
 		return err
 	}
-	return c.SetDeadline(time.Now().Add(time.Millisecond * 100))
+	return c.SetDeadline(time.Now().Add(time.Second * 10))
 }
 
 func getPQCKey(pqcKeyFile string) (string, error) {

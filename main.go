@@ -236,6 +236,15 @@ func main() {
 	result := make(chan string)
 	kmsAuth := kms.NewClientCertificateAuth(cfg.Certificate, cfg.PrivateKey, cfg.CACertificate)
 	kmsServer := kms.NewKMSServer(cfg.KMSURL, int(cfg.KMSHTTPTimeout.Seconds()), kmsAuth)
+
+	// Determine role based on address comparison
+	isMaster := cfg.ListenAddress < cfg.ServerAddress
+	if isMaster {
+		log.Println("=== Role: MASTER (initiates key rotation) ===")
+	} else {
+		log.Println("=== Role: BACKUP (receives key rotation) ===")
+	}
+
 	for {
 		go tcpServer(cfg.ListenAddress, result, done)
 		go func() {
@@ -258,38 +267,45 @@ func main() {
 				}
 			}
 		}()
-		go func() {
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			i := 20
-			for {
-				select {
-				case <-skip:
-				default:
-					// get key_id and send
-					log.Printf("--> MASTER: fetch key_id from %s\n", cfg.KMSURL)
+		// Only start master rotation goroutine if we are the master
+		if isMaster {
+			go func() {
+				ticker := time.NewTicker(interval)
+				defer ticker.Stop()
+				i := 20
+				for {
+					select {
+					case <-skip:
+					default:
+						// get key_id and send
+						log.Printf("--> MASTER: fetch key_id from %s\n", cfg.KMSURL)
 
-					key, err := kmsServer.GetNewKey()
-					if err != nil {
-						log.Println(err.Error())
-						time.Sleep(time.Second * time.Duration(fibonacciRecursion(i/10)))
-						i++
-						continue
+						key, err := kmsServer.GetNewKey()
+						if err != nil {
+							log.Println(err.Error())
+							time.Sleep(time.Second * time.Duration(fibonacciRecursion(i/10)))
+							i++
+							continue
+						}
+						i = 20
+						log.Printf("--> MASTER: send key_id to %s\n", cfg.ServerAddress)
+						err = tcpClient(cfg.ServerAddress, key.GetID())
+						if err != nil {
+							log.Println(err.Error())
+							time.Sleep(time.Second * time.Duration(fibonacciRecursion(i/10)))
+							i++
+							continue
+						}
+						i = 20
+						err = setPSK(key.GetKey(), cfg, "--> MASTER:")
+						if err != nil {
+							log.Println(err.Error())
+						}
 					}
-					i = 20
-					log.Printf("--> MASTER: send key_id to %s\n", cfg.ServerAddress)
-					err = tcpClient(cfg.ServerAddress, key.GetID())
-					if err != nil {
-						log.Println(err.Error())
-					}
-					err = setPSK(key.GetKey(), cfg, "--> MASTER:")
-					if err != nil {
-						log.Println(err.Error())
-					}
+					<-ticker.C
 				}
-				<-ticker.C
-			}
-		}()
+			}()
+		}
 		<-done
 		break
 	}

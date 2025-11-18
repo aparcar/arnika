@@ -45,7 +45,7 @@ func handleServerConnection(c net.Conn, result chan string) {
 		for scanner.Scan() {
 			msg := scanner.Text()
 			result <- msg
-			_, err := c.Write([]byte("ACK" + "\n"))
+			_, err := c.Write([]byte("ACK:" + msg + "\n"))
 			if err != nil { // Handle the write error
 				fmt.Println("Failed to write to connection:", err)
 				break
@@ -115,11 +115,28 @@ func tcpClient(url, data string) error {
 			c.Close()
 		}
 	}()
+
+	// Send data
 	_, err = c.Write([]byte(data + "\n"))
 	if err != nil {
 		return err
 	}
-	return c.SetDeadline(time.Now().Add(time.Second * 10))
+
+	// Wait for ACK response before returning
+	c.SetReadDeadline(time.Now().Add(time.Second * 10))
+	scanner := bufio.NewScanner(c)
+	if !scanner.Scan() {
+		return fmt.Errorf("failed to read ACK: %v", scanner.Err())
+	}
+
+	ack := scanner.Text()
+	expectedAck := "ACK:" + data
+	if ack != expectedAck {
+		return fmt.Errorf("invalid ACK response: expected '%s', got '%s'", expectedAck, ack)
+	}
+
+	log.Printf("Received ACK confirmation for key_id: %s\n", data)
+	return nil
 }
 
 func getPQCKey(pqcKeyFile string) (string, error) {

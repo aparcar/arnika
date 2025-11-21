@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
@@ -179,6 +181,25 @@ func fibonacciRecursion(n int) int {
 	return fibonacciRecursion(n-1) + fibonacciRecursion(n-2)
 }
 
+// generateRandomKey generates a random 256-bit key as a base64 string
+func generateRandomKey() (string, error) {
+	key := make([]byte, 32) // 256 bits = 32 bytes
+	_, err := rand.Read(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random key: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
+// resetFailsafeTimer resets the failsafe timer by sending a signal
+func resetFailsafeTimer(reset chan bool) {
+	select {
+	case reset <- true:
+	default:
+		// Channel is full, skip
+	}
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	versionLong := flag.Bool("version", false, "print version and exit")
@@ -234,6 +255,7 @@ func main() {
 	done := make(chan bool)
 	skip := make(chan bool)
 	result := make(chan string)
+	failsafeReset := make(chan bool, 1)
 	kmsAuth := kms.NewClientCertificateAuth(cfg.Certificate, cfg.PrivateKey, cfg.CACertificate)
 	kmsServer := kms.NewKMSServer(cfg.KMSURL, int(cfg.KMSHTTPTimeout.Seconds()), kmsAuth)
 
@@ -244,6 +266,36 @@ func main() {
 	} else {
 		log.Println("=== Role: BACKUP (receives key rotation) ===")
 	}
+
+	// Start failsafe timer goroutine
+	go func() {
+		failsafeTimeout := interval + (60 * time.Second)
+		log.Printf("Failsafe timer set to %s (interval + 60s)", failsafeTimeout)
+		timer := time.NewTimer(failsafeTimeout)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-timer.C:
+				log.Println("!!! FAILSAFE TRIGGERED: No successful handshake within timeout, setting random key !!!")
+				randomKey, err := generateRandomKey()
+				if err != nil {
+					log.Printf("ERROR: Failed to generate random key: %v", err)
+				} else {
+					err = setPSK(randomKey, cfg, "*** FAILSAFE:")
+					if err != nil {
+						log.Printf("ERROR: Failed to set failsafe PSK: %v", err)
+					} else {
+						log.Println("*** FAILSAFE: Random key successfully set")
+					}
+				}
+				// Reset timer for next failsafe
+				timer.Reset(failsafeTimeout)
+			case <-failsafeReset:
+				timer.Reset(failsafeTimeout)
+			}
+		}
+	}()
 
 	for {
 		go tcpServer(cfg.ListenAddress, result, done)
@@ -264,6 +316,9 @@ func main() {
 				err = setPSK(key.GetKey(), cfg, "<-- BACKUP:")
 				if err != nil {
 					log.Println(err.Error())
+				} else {
+					// Reset failsafe timer on successful handshake
+					resetFailsafeTimer(failsafeReset)
 				}
 			}
 		}()
@@ -300,6 +355,9 @@ func main() {
 						err = setPSK(key.GetKey(), cfg, "--> MASTER:")
 						if err != nil {
 							log.Println(err.Error())
+						} else {
+							// Reset failsafe timer on successful handshake
+							resetFailsafeTimer(failsafeReset)
 						}
 					}
 					<-ticker.C

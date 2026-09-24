@@ -16,6 +16,9 @@ import (
 )
 
 func getKeyWriterService(cfg *config.Config) (*services.KeyWriterService, error) {
+	if err := cfg.RequireWireGuardPeer(); err != nil {
+		return nil, err
+	}
 	baseURL := os.Getenv("MIKROTIK_URL")
 	if baseURL == "" {
 		return nil, fmt.Errorf("[ERROR] MIKROTIK_URL is required for the wireguard_mikrotik build")

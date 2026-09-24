@@ -116,6 +116,10 @@ func writePSK(keyWriter *services.KeyWriterService, psk []byte, fromQKD bool, cf
 	if fromQKD {
 		lastQKDPSKAt.Store(time.Now().UnixNano())
 	}
+	if cfg.WireGuardInterface == "" {
+		logger.Info("PSK configured via key writer")
+		return true
+	}
 	logger.Info("PSK configured on WireGuard interface", // message counted by ci/local-darwin/run.sh and ci/e2e
 		"iface", cfg.WireGuardInterface, "peer", cfg.WireguardPeerPublicKey)
 	return true
@@ -206,7 +210,7 @@ func main() {
 	result := make(chan transport.KeyIDRequest, transport.QKDQueueDepth)
 	keyWriter, err := getKeyWriterService(cfg)
 	if err != nil {
-		fatal("failed to create the WireGuard key writer", "err", err)
+		fatal("failed to create the key writer", "err", err)
 	}
 	dirOut, dirIn := auth.DirectionFor(arnikaID)
 	var pqc *services.KeyReaderService

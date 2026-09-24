@@ -74,7 +74,7 @@ func TestRedactSecret(t *testing.T) {
 }
 
 func TestParse(t *testing.T) {
-	for _, mandatoryEnvVar := range []string{"LISTEN_ADDRESS", "SERVER_ADDRESS", "WIREGUARD_INTERFACE", "WIREGUARD_PEER_PUBLIC_KEY", "ARNIKA_PSK"} {
+	for _, mandatoryEnvVar := range []string{"LISTEN_ADDRESS", "SERVER_ADDRESS", "ARNIKA_PSK"} {
 		_, err := Parse()
 		if err == nil {
 			t.Errorf("Expected an error for missing %s", mandatoryEnvVar)
@@ -141,6 +141,24 @@ func TestParse(t *testing.T) {
 	t.Setenv("PQC_ROUND_TIMEOUT", "2s")
 	if _, err = Parse(); err != nil {
 		t.Errorf("Expected a valid PQC configuration to parse, got %v", err)
+	}
+}
+
+func TestRequireWireGuardPeer(t *testing.T) {
+	const pub = "H9adDtDHXhVzSI4QMScbftvQM49wGjmBT1g6dgynsHc="
+	tests := []struct {
+		iface, pub string
+		wantErr    bool
+	}{
+		{"wg0", pub, false},
+		{"", pub, true},
+		{"wg0", "", true},
+	}
+	for _, tt := range tests {
+		c := &Config{WireGuardInterface: tt.iface, WireguardPeerPublicKey: tt.pub}
+		if err := c.RequireWireGuardPeer(); (err != nil) != tt.wantErr {
+			t.Errorf("RequireWireGuardPeer(%q, %q) error = %v, wantErr %v", tt.iface, tt.pub, err, tt.wantErr)
+		}
 	}
 }
 

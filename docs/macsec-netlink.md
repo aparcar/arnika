@@ -95,6 +95,150 @@ arnika
 
 ---
 
+## Part 5 — Configuration Example: Two Sites
+
+Two sites, **Alice** and **Bob**, share a Layer 2 link on `eth1` and protect it with MACsec. Each site runs its own Arnika and has its own KMS. The Arnika peer channel runs over a separate management network, so key rotation keeps working even while the MACsec link is down.
+
+```text
+            management network (Arnika peer channel, UDP 9999)
+   Alice 192.0.2.10 ─────────────────────────────── 192.0.2.20 Bob
+
+   Alice eth1 52:54:00:aa:00:01 ──── L2 link ──── 52:54:00:bb:00:02 eth1 Bob
+   Alice macsec0 10.0.0.1/30 ═══ MACsec GCM-AES-XPN-256 ═══ 10.0.0.2/30 macsec0 Bob
+```
+
+### Step 1 — Create the MACsec interface on both sites
+
+The SCI is the interface's MAC address followed by a 2-byte port number. With `port 1`, `ip` derives it from `eth1`'s MAC address.
+
+**Alice**:
+```bash
+sudo ip link add link eth1 macsec0 type macsec port 1 cipher gcm-aes-xpn-256 encrypt on
+sudo ip addr add 10.0.0.1/30 dev macsec0
+sudo ip link set macsec0 up
+ip macsec show macsec0 | grep TXSC    # TXSC: 525400aa00010001 on SA 0
+```
+
+**Bob**:
+```bash
+sudo ip link add link eth1 macsec0 type macsec port 1 cipher gcm-aes-xpn-256 encrypt on
+sudo ip addr add 10.0.0.2/30 dev macsec0
+sudo ip link set macsec0 up
+ip macsec show macsec0 | grep TXSC    # TXSC: 525400bb00020001 on SA 0
+```
+
+Each side's `TXSC` value is the other side's `MACSEC_RX_SCI`. Use `cipher gcm-aes-256` on both sides instead for links below roughly 10 Gbit/s.
+
+### Step 2 — Environment files
+
+**Alice** (`/opt/arnika/arnika.env`):
+```bash
+sudo tee /opt/arnika/arnika.env > /dev/null << EOF
+INTERVAL="120s"
+LISTEN_ADDRESS="192.0.2.10:9999"
+SERVER_ADDRESS="192.0.2.20:9999"
+ARNIKA_ID="9999"
+ARNIKA_PSK="<SHARED_ARNIKA_PSK>"
+# KMS client certificate (KMS connection only - not the peer channel):
+CERTIFICATE="/opt/arnika/kms_certs/arnika-alice.crt"
+PRIVATE_KEY="/opt/arnika/kms_certs/arnika-alice.key"
+CA_CERTIFICATE="/opt/arnika/kms_certs/ca.crt"
+KMS_URL="https://<ALICE_KMS_SERVER>:7000/api/v1/keys/arnika-bob"
+# MACsec key writer (this module):
+MACSEC_INTERFACE="macsec0"
+MACSEC_RX_SCI="525400bb00020001"
+EOF
+sudo chmod 600 /opt/arnika/arnika.env
+```
+
+**Bob** (`/opt/arnika/arnika.env`):
+```bash
+sudo tee /opt/arnika/arnika.env > /dev/null << EOF
+INTERVAL="120s"
+LISTEN_ADDRESS="192.0.2.20:9999"
+SERVER_ADDRESS="192.0.2.10:9999"
+ARNIKA_ID="9998"
+ARNIKA_PSK="<SHARED_ARNIKA_PSK>"
+# KMS client certificate (KMS connection only - not the peer channel):
+CERTIFICATE="/opt/arnika/kms_certs/arnika-bob.crt"
+PRIVATE_KEY="/opt/arnika/kms_certs/arnika-bob.key"
+CA_CERTIFICATE="/opt/arnika/kms_certs/ca.crt"
+KMS_URL="https://<BOB_KMS_SERVER>:7000/api/v1/keys/arnika-alice"
+# MACsec key writer (this module):
+MACSEC_INTERFACE="macsec0"
+MACSEC_RX_SCI="525400aa00010001"
+EOF
+sudo chmod 600 /opt/arnika/arnika.env
+```
+
+Generate `ARNIKA_PSK` once, e.g. with `openssl rand -base64 32`, and copy it to both sites out of band.
+
+These differ per site:
+
+| Env var | Meaning |
+|---|---|
+| `LISTEN_ADDRESS` / `SERVER_ADDRESS` | Own and peer address of the Arnika peer channel |
+| `ARNIKA_ID` | Must differ in **parity** (one odd, one even): only the lowest bit takes part in the PRIMARY/BACKUP election |
+| `KMS_URL`, `CERTIFICATE`, `PRIVATE_KEY` | Each site talks to its own KMS |
+| `MACSEC_RX_SCI` | The **other** site's `TXSC` |
+
+And these must be **identical** on both sites:
+
+| Setting | Meaning |
+|---|---|
+| `ARNIKA_PSK` | Authenticates and encrypts the peer channel; with it unset the channel offers no protection |
+| `INTERVAL` | Roles are elected per interval number, so different intervals drift the sites apart |
+| `MODE` | Both sides must agree which key sources are mandatory (default `AtLeastQkdRequired`) |
+| MACsec `cipher` | Both interfaces must use the same suite, `gcm-aes-256` or `gcm-aes-xpn-256` |
+
+### Step 3 — systemd unit
+
+The unit creates the MACsec interface if it does not exist yet (the `-` prefix ignores "already exists" on restarts), then starts Arnika. Shown for Alice; on Bob use `10.0.0.2/30`.
+
+```bash
+sudo tee /etc/systemd/system/arnika.service > /dev/null << EOF
+# /etc/systemd/system/arnika.service
+[Unit]
+Description=Arnika Quantum Secure VPN (MACsec)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/sbin/ip link add link eth1 macsec0 type macsec port 1 cipher gcm-aes-xpn-256 encrypt on
+ExecStartPre=-/usr/sbin/ip addr add 10.0.0.1/30 dev macsec0
+ExecStartPre=/usr/sbin/ip link set macsec0 up
+ExecStart=/opt/arnika/arnika
+EnvironmentFile=/opt/arnika/arnika.env
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now arnika.service
+```
+
+This runs Arnika as `root`. For production, use a dedicated service user with `AmbientCapabilities=CAP_NET_ADMIN` and the hardening directives from [`SECURITY.md`](../SECURITY.md); creating the interface then moves to a separate unit or your network configuration.
+
+### Step 4 — Verify
+
+Within one `INTERVAL` both sites should transmit with the same key:
+
+```bash
+ip macsec show macsec0            # abbreviated output on Alice
+#   TXSC: 525400aa00010001 on SA 2
+#       2: PN 1834, state on, SSCI 1, key 6f0c...        <- same key ID on both sites
+#   RXSC: 525400bb00020001, state on
+#       2: PN 1901, state on, SSCI 2, key 6f0c...
+ping -c 3 10.0.0.2
+ip -s macsec show macsec0    # InPktsNotValid / InPktsNotUsingSA should stay flat across rotations
+```
+
+The SSCI appears only with XPN; the site with the lower SCI transmits as SSCI 1. Replay protection (`replay on window <n>` on the interface) is optional and not covered by the integration test.
+
+---
+
 ## References
 
 - Module architecture: [`KEYCONTROL.md`](../KEYCONTROL.md)

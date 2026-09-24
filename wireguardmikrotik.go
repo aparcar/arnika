@@ -22,6 +22,9 @@ import (
 // the build tag) so the shared config.Config stays transport-agnostic, while
 // the WireGuard interface and peer public key are reused from the shared config.
 func getKeyWriterService(cfg *config.Config) (*services.KeyWriterService, error) {
+	if err := cfg.RequireWireGuardPeer(); err != nil {
+		return nil, err
+	}
 	baseURL := os.Getenv("MIKROTIK_URL")
 	if baseURL == "" {
 		return nil, fmt.Errorf("[ERROR] MIKROTIK_URL is required for the wireguard_mikrotik build")

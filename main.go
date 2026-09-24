@@ -84,6 +84,10 @@ func setPSK(keyWriter *services.KeyWriterService, pqc *services.KeyReaderService
 		msg = fmt.Sprintf("[ERROR] %s failed to configure PSK on WireGuard interface: %v", logPrefix, err)
 		return
 	}
+	if cfg.WireGuardInterface == "" {
+		log.Printf("[INFO] %s [OK] PSK configured via key writer", logPrefix)
+		return
+	}
 	log.Printf("[INFO] %s [OK] PSK configured on WireGuard interface: %s for peer: %s", logPrefix, cfg.WireGuardInterface, cfg.WireguardPeerPublicKey)
 }
 
@@ -127,7 +131,7 @@ func main() {
 	pqc := getPQCService(cfg)
 	keyWriter, err := getKeyWriterService(cfg)
 	if err != nil {
-		log.Panicf("[ERROR] [STOP] Failed to create WireGuard repository: %v", err)
+		log.Panicf("[ERROR] [STOP] Failed to create key writer: %v", err)
 	}
 	go udpServer(cfg.ListenAddress, []byte(cfg.ArnikaPSK), result, done, cfg.RateLimit, cfg.RateWindow, cfg.MaxClockSkew)
 	go func() {

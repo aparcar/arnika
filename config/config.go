@@ -70,6 +70,19 @@ func (c *Config) IsPrimary(intervalNum uint64) bool {
 	return xored&1 == 0
 }
 
+// RequireWireGuardPeer fails fast when a WireGuard-family key writer is built
+// but the interface or peer public key is missing. Parse leaves both optional
+// because non-WireGuard writers (MACsec) do not use them.
+func (c *Config) RequireWireGuardPeer() error {
+	if c.WireGuardInterface == "" {
+		return fmt.Errorf("[ERROR] WIREGUARD_INTERFACE is required for this key writer")
+	}
+	if c.WireguardPeerPublicKey == "" {
+		return fmt.Errorf("[ERROR] WIREGUARD_PEER_PUBLIC_KEY is required for this key writer")
+	}
+	return nil
+}
+
 func (c *Config) PrintStartupConfig() {
 	fmt.Println("=== Arnika Configuration ===")
 	fmt.Printf("Arnika Mode:              %s\n", c.Mode)
@@ -166,14 +179,10 @@ func Parse() (*Config, error) {
 		return nil, fmt.Errorf("[ERROR] failed to parse INTERVAL: %w", err)
 	}
 	config.Interval = interval
-	config.WireGuardInterface, err = getEnv("WIREGUARD_INTERFACE")
-	if err != nil {
-		return nil, err
-	}
-	config.WireguardPeerPublicKey, err = getEnv("WIREGUARD_PEER_PUBLIC_KEY")
-	if err != nil {
-		return nil, err
-	}
+	// Optional here: only the WireGuard-family key writers need them, and they
+	// validate them in their wiring file (see RequireWireGuardPeer).
+	config.WireGuardInterface = getEnvOrDefault("WIREGUARD_INTERFACE", "")
+	config.WireguardPeerPublicKey = getEnvOrDefault("WIREGUARD_PEER_PUBLIC_KEY", "")
 	config.PQCPSKFile = getEnvOrDefault("PQC_PSK_FILE", "")
 	if config.PQCPSKFile != "" {
 		fileInfo, err := os.Stat(config.PQCPSKFile)

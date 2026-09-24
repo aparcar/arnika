@@ -9,6 +9,9 @@ import (
 )
 
 func getKeyWriterService(cfg *config.Config) (*services.KeyWriterService, error) {
+	if err := cfg.RequireWireGuardPeer(); err != nil {
+		return nil, err
+	}
 	wireguardRepo, err := repositories.NewWireguardNetlinkRepository(cfg.WireGuardInterface, cfg.WireguardPeerPublicKey)
 	if err != nil {
 		return nil, err

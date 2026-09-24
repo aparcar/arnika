@@ -11,6 +11,9 @@ import (
 )
 
 func getKeyWriterService(cfg *config.Config) (*services.KeyWriterService, error) {
+	if err := cfg.RequireWireGuardPeer(); err != nil {
+		return nil, err
+	}
 	netnsPath := os.Getenv("WIREGUARD_NETNS_PATH")
 	wireguardRepo, err := repositories.NewWireguardNetlinkNetnsRepository(cfg.WireGuardInterface, cfg.WireguardPeerPublicKey, netnsPath)
 	if err != nil {

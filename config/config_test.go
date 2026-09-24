@@ -28,7 +28,7 @@ func TestUsePQC(t *testing.T) {
 
 func TestParse(t *testing.T) {
 	// Test case 1: Missing environment variable
-	for _, mandatoryEnvVar := range []string{"LISTEN_ADDRESS", "SERVER_ADDRESS", "KMS_URL", "WIREGUARD_INTERFACE", "WIREGUARD_PEER_PUBLIC_KEY"} {
+	for _, mandatoryEnvVar := range []string{"LISTEN_ADDRESS", "SERVER_ADDRESS", "KMS_URL"} {
 		_, err := Parse()
 		if err == nil {
 			t.Errorf("Expected an error for missing %s", mandatoryEnvVar)
@@ -143,6 +143,24 @@ func TestParse_PQCFilePermissions(t *testing.T) {
 	_, err = Parse()
 	if err == nil {
 		t.Error("Expected an error for group-readable permissions (0660)")
+	}
+}
+
+func TestRequireWireGuardPeer(t *testing.T) {
+	const pub = "H9adDtDHXhVzSI4QMScbftvQM49wGjmBT1g6dgynsHc="
+	tests := []struct {
+		iface, pub string
+		wantErr    bool
+	}{
+		{"wg0", pub, false},
+		{"", pub, true},
+		{"wg0", "", true},
+	}
+	for _, tt := range tests {
+		c := &Config{WireGuardInterface: tt.iface, WireguardPeerPublicKey: tt.pub}
+		if err := c.RequireWireGuardPeer(); (err != nil) != tt.wantErr {
+			t.Errorf("RequireWireGuardPeer(%q, %q) error = %v, wantErr %v", tt.iface, tt.pub, err, tt.wantErr)
+		}
 	}
 }
 

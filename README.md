@@ -285,6 +285,7 @@ make build                                  # netlink (default)
 make build-netlink                          # netlink (explicit)
 make build-mikrotik                         # MikroTik RouterOS REST API
 make build BUILD_TAGS=wireguard_mikrotik    # same, long form
+make build BUILD_TAGS=macsec_netlink        # MACsec (GCM-AES-256 or XPN-256), Linux only
 ```
 
 See [`KEYCONTROL.md`](KEYCONTROL.md) for the key writer architecture and
@@ -485,9 +486,18 @@ start without them.
 | `WIREGUARD_INTERFACE` | ✅ | — | WireGuard interface whose peer PSK is rotated, e.g. `qcicat0`. With the MikroTik key writer this is the interface **on the router** |
 | `WIREGUARD_PEER_PUBLIC_KEY` | ✅ | — | Public key of the WireGuard peer whose PSK is rotated |
 
+Both are required by the WireGuard-family key writers (netlink, netlink-netns, MikroTik)
+and ignored by the others.
+
 The MikroTik key writer (`wireguard_mikrotik` build tag) adds `MIKROTIK_URL`,
 `MIKROTIK_USERNAME`, `MIKROTIK_PASSWORD`, `MIKROTIK_CA_CERTIFICATE`, `MIKROTIK_TLS_INSECURE` and
 `MIKROTIK_HTTP_TIMEOUT` — documented in [`docs/wireguard-mikrotik.md`](docs/wireguard-mikrotik.md).
+
+## Key writer — other targets
+
+| Build tag | Variables | Document |
+|---|---|---|
+| `macsec_netlink` | `MACSEC_INTERFACE`, `MACSEC_RX_SCI` | [`docs/macsec-netlink.md`](docs/macsec-netlink.md) |
 
 ---
 

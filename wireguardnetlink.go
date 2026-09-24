@@ -1,4 +1,4 @@
-//go:build wireguard_netlink || (!wireguard_mikrotik && !wireguard_netlink_netns)
+//go:build wireguard_netlink || (!wireguard_mikrotik && !wireguard_netlink_netns && !macsec_netlink)
 
 package main
 

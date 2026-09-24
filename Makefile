@@ -15,6 +15,8 @@ BUILD_DIR ?= build
 #   (empty)            -> netlink, local WireGuard via wgctrl [default]
 #   wireguard_netlink  -> netlink (explicit)
 #   wireguard_mikrotik -> MikroTik RouterOS REST API
+#   wireguard_netlink_netns -> netlink inside a network namespace (Linux)
+#   macsec_netlink     -> MACsec SAs via generic netlink (Linux)
 # Usage: make build BUILD_TAGS=wireguard_mikrotik
 BUILD_TAGS ?=
 TAGS_FLAG := $(if $(BUILD_TAGS),-tags "$(BUILD_TAGS)",)

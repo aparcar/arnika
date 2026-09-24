@@ -108,6 +108,7 @@ signal.
 | `wireguard-netlink` | Writer | [`repositories/wireguard-netlink.go`](repositories/wireguard-netlink.go) | _(default)_ / `wireguard_netlink` | linux _(compiles elsewhere, no device)_ | [`docs/wireguard-netlink.md`](docs/wireguard-netlink.md) |
 | `wireguard-netlink-netns` | Writer | [`repositories/wireguard-netlink-netns.go`](repositories/wireguard-netlink-netns.go) | `wireguard_netlink_netns` | linux | [`docs/wireguard-netlink-netns.md`](docs/wireguard-netlink-netns.md) |
 | `wireguard-mikrotik` | Writer | [`repositories/wireguard-mikrotik.go`](repositories/wireguard-mikrotik.go) | `wireguard_mikrotik` | any | [`docs/wireguard-mikrotik.md`](docs/wireguard-mikrotik.md) |
+| `macsec-netlink` | Writer | [`repositories/macsec-netlink.go`](repositories/macsec-netlink.go) | `macsec_netlink` | linux | [`docs/macsec-netlink.md`](docs/macsec-netlink.md) |
 ---
 
 ## Code Map
@@ -115,7 +116,7 @@ signal.
 | Concern | Port (service) | Adapter interface | Adapters (repositories) |
 |---|---|---|---|
 | Read keys | [`services/keyreader.go`](services/keyreader.go) `KeyReaderService` | `KeyReaderManaged`, `KeyReaderUnmanaged` | [`repositories/kms.go`](repositories/kms.go), [`repositories/pqc.go`](repositories/pqc.go) |
-| Write keys | [`services/keywriter.go`](services/keywriter.go) `KeyWriterService` | `keyWriterRepository` (`SetPSK`, `InvalidateTunnel`) | [`repositories/wireguard-netlink.go`](repositories/wireguard-netlink.go), [`repositories/wireguard-mikrotik.go`](repositories/wireguard-mikrotik.go) |
+| Write keys | [`services/keywriter.go`](services/keywriter.go) `KeyWriterService` | `keyWriterRepository` (`SetPSK`, `InvalidateTunnel`) | [`repositories/wireguard-netlink.go`](repositories/wireguard-netlink.go), [`repositories/wireguard-mikrotik.go`](repositories/wireguard-mikrotik.go), [`repositories/macsec-netlink.go`](repositories/macsec-netlink.go) |
 
 ---
 
@@ -163,10 +164,14 @@ Three rules follow from that table and are worth stating explicitly:
 3. **Backend-specific configuration is read in the wiring file**, not in
    [`config/config.go`](config/config.go). The shared `config.Config` stays
    transport-agnostic; a backend that needs a URL, credentials, a CA bundle or a namespace
-   path reads them from the environment behind its own build tag.
+   path reads them from the environment behind its own build tag. `WIREGUARD_INTERFACE`
+   and `WIREGUARD_PEER_PUBLIC_KEY` are parsed into `config.Config` but are optional there;
+   WireGuard-family wiring files enforce them with `cfg.RequireWireGuardPeer()`,
+   so non-WireGuard writers such as MACsec do not need them.
 
-Build tags use the `wireguard_<backend>` form (underscores — Go build tags
-cannot contain dashes), while file and document names use dashes.
+Build tags use the `<target>_<backend>` form, e.g. `wireguard_mikrotik` or
+`macsec_netlink` (underscores — Go build tags cannot contain dashes), while file
+and document names use dashes.
 
 ---
 

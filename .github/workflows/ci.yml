@@ -111,6 +111,7 @@ jobs:
             "wireguard_netlink:linux darwin"
             "wireguard_mikrotik:linux darwin"
             "wireguard_netlink_netns:linux"
+            "macsec_netlink:linux"
           )
           ALL_GOOS=(linux darwin)
 

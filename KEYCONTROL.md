@@ -112,6 +112,7 @@ signal.
 | `wireguard-netlink` | Writer | [`repositories/wgnetlink/netlink.go`](repositories/wgnetlink/netlink.go) | *(default)* / `wireguard_netlink` | linux *(compiles elsewhere, no device)* | [`docs/wireguard-netlink.md`](docs/wireguard-netlink.md) |
 | `wireguard-netlink-netns` | Writer | [`repositories/wgnetlink/netns.go`](repositories/wgnetlink/netns.go) | `wireguard_netlink_netns` | linux | [`docs/wireguard-netlink-netns.md`](docs/wireguard-netlink-netns.md) |
 | `wireguard-mikrotik` | Writer | [`repositories/wgmikrotik/mikrotik.go`](repositories/wgmikrotik/mikrotik.go) | `wireguard_mikrotik` | any | [`docs/wireguard-mikrotik.md`](docs/wireguard-mikrotik.md) |
+| `macsec-netlink` | Writer | [`repositories/macsecnetlink/macsec.go`](repositories/macsecnetlink/macsec.go) | `macsec_netlink` | linux | [`docs/macsec-netlink.md`](docs/macsec-netlink.md) |
 
 ---
 
@@ -120,7 +121,7 @@ signal.
 | Concern | Port (service) | Adapter interface | Adapters (repositories) |
 | --- | --- | --- | --- |
 | Read keys | [`services/keyreader.go`](services/keyreader.go) `KeyReaderService` | `KeyReader`, plus the optional `KeyResolver` | [`repositories/kms/kms.go`](repositories/kms/kms.go), [`repositories/pqchpke/pqchpke.go`](repositories/pqchpke/pqchpke.go) |
-| Write keys | [`services/keywriter.go`](services/keywriter.go) `KeyWriterService` | `keyWriterRepository` (`SetPSK`) | [`repositories/wgnetlink/netlink.go`](repositories/wgnetlink/netlink.go), [`repositories/wgmikrotik/mikrotik.go`](repositories/wgmikrotik/mikrotik.go) |
+| Write keys | [`services/keywriter.go`](services/keywriter.go) `KeyWriterService` | `keyWriterRepository` (`SetPSK`), plus the optional `InvalidateTunnel` | [`repositories/wgnetlink/netlink.go`](repositories/wgnetlink/netlink.go), [`repositories/wgmikrotik/mikrotik.go`](repositories/wgmikrotik/mikrotik.go), [`repositories/macsecnetlink/macsec.go`](repositories/macsecnetlink/macsec.go) |
 
 ---
 
@@ -178,10 +179,14 @@ Three rules follow from that table and are worth stating explicitly:
 3. **Backend-specific configuration is read in the wiring file**, not in
    [`config/config.go`](config/config.go). The shared `config.Config` stays
    transport-agnostic; a backend that needs a URL, credentials, a CA bundle or a namespace
-   path reads them from the environment behind its own build tag.
+   path reads them from the environment behind its own build tag. `WIREGUARD_INTERFACE`
+   and `WIREGUARD_PEER_PUBLIC_KEY` are parsed into `config.Config` but are optional there;
+   WireGuard-family wiring files enforce them with `cfg.RequireWireGuardPeer()`,
+   so non-WireGuard writers such as MACsec do not need them.
 
-Build tags use the `wireguard_<backend>` form (underscores — Go build tags
-cannot contain dashes), while file and document names use dashes.
+Build tags use the `<target>_<backend>` form, e.g. `wireguard_mikrotik` or
+`macsec_netlink` (underscores — Go build tags cannot contain dashes), while file
+and document names use dashes.
 
 ---
 
@@ -334,7 +339,10 @@ type keyWriterRepository interface {
 - `KeyWriterService.InvalidateTunnel` is the **fail-safe**. `setPSK` in
   [`main.go`](main.go) calls it whenever no valid key material is available.
   The service generates a fresh random 32-byte PSK with `crypto/rand` and
-  passes it through `SetPSK`; adapters do not implement invalidation themselves.
+  passes it through `SetPSK`. An adapter implements `InvalidateTunnel() error`
+  itself only when a random key would **not** cut traffic — MACsec, where a new
+  SA leaves the current key's RX SA accepting the peer's frames, so it removes
+  every SA instead. The service prefers that hook when present.
 - Errors are surfaced and logged by the caller; return wrapped errors with
   enough context to identify the interface and peer.
 
@@ -345,21 +353,23 @@ The mechanism is a single factory function, `getKeyWriterService(cfg)`, that is
 
 | File | Build constraint |
 | --- | --- |
-| [`wire_wireguard_netlink.go`](wire_wireguard_netlink.go) | `//go:build wireguard_netlink \|\| (!wireguard_mikrotik && !wireguard_netlink_netns)` |
+| [`wire_wireguard_netlink.go`](wire_wireguard_netlink.go) | `//go:build wireguard_netlink \|\| (!wireguard_mikrotik && !wireguard_netlink_netns && !macsec_netlink)` |
 | [`wire_wireguard_mikrotik.go`](wire_wireguard_mikrotik.go) | `//go:build wireguard_mikrotik` |
 | [`wire_wireguard_netlink_netns.go`](wire_wireguard_netlink_netns.go) | `//go:build wireguard_netlink_netns` |
+| [`wire_macsec_netlink.go`](wire_macsec_netlink.go) | `//go:build macsec_netlink && linux` |
 
 `main.go` calls `getKeyWriterService(cfg)` without knowing which file provides
 it. The constraints are designed so that netlink is the **default** and so that
 you can never accidentally compile two writers at once:
 
-| `-tags` passed | netlink | mikrotik | netns | Result |
-| --- | :---: | :---: | :---: | --- |
-| *(none)* | ✅ (negated clause) | ❌ | ❌ | **netlink** (default) |
-| `wireguard_netlink` | ✅ | ❌ | ❌ | **netlink** (explicit) |
-| `wireguard_mikrotik` | ❌ | ✅ | ❌ | **mikrotik** |
-| `wireguard_netlink_netns` | ❌ | ❌ | ✅ | **netns** |
-| any two writer tags | ✅ or ❌ | | | ❌ **compile error**, `getKeyWriterService redeclared` |
+| `-tags` passed | netlink | mikrotik | netns | macsec | Result |
+| --- | :---: | :---: | :---: | :---: | --- |
+| *(none)* | ✅ (negated clause) | ❌ | ❌ | ❌ | **netlink** (default) |
+| `wireguard_netlink` | ✅ | ❌ | ❌ | ❌ | **netlink** (explicit) |
+| `wireguard_mikrotik` | ❌ | ✅ | ❌ | ❌ | **mikrotik** |
+| `wireguard_netlink_netns` | ❌ | ❌ | ✅ | ❌ | **netns** |
+| `macsec_netlink` | ❌ | ❌ | ❌ | ✅ (linux) | **macsec** |
+| any two writer tags | ✅ or ❌ | | | | ❌ **compile error**, `getKeyWriterService redeclared` |
 
 The last row is intentional: requesting both backends is a mistake, and the
 duplicate-symbol error catches it at build time rather than silently picking one.
@@ -380,7 +390,8 @@ that must not survive a build.
 
 1. **Write the adapter** at `repositories/<pkg>/<name>.go` implementing
    `SetPSK` as described above. `KeyWriterService` provides
-   `InvalidateTunnel`; adapters do not implement it. Do **not** put a
+   `InvalidateTunnel`; implement it in the adapter only if a random key would
+   not cut traffic (see above). Do **not** put a
    writer-selection tag on this file. Take the HTTP client (or equivalent
    transport) as a constructor argument so that TLS trust and timeouts are
    configured once, at the wiring layer.
@@ -509,6 +520,7 @@ that is not named keeps its default:
 | Key writer | `wireguard_netlink` | ✅ | Local kernel WireGuard interface via `wgctrl` |
 | | `wireguard_netlink_netns` | | Same, inside a network namespace (`linux` only) |
 | | `wireguard_mikrotik` | | MikroTik RouterOS REST API |
+| | `macsec_netlink` | | MACsec SAs via generic netlink (`linux` only) |
 | QKD reader | `qkd_kms` | ✅ | KMS client, ETSI GS QKD 014 |
 | | `qkd_none` | | No QKD reader: 40 % smaller; requires `MODE=AtLeastPqcRequired` or `PqcOnly`; `PqcOnly` ignores `KMS_URL` |
 

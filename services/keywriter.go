@@ -13,6 +13,12 @@ type keyWriterRepository interface {
 	SetPSK(psk []byte) error
 }
 
+// tunnelInvalidator is optional, for adapters where a random PSK would not cut traffic:
+// a MACsec writer would keep the current key's RX SA and go on accepting the peer's frames.
+type tunnelInvalidator interface {
+	InvalidateTunnel() error
+}
+
 type KeyWriterService struct {
 	mu   sync.Mutex
 	repo keyWriterRepository
@@ -23,6 +29,11 @@ func NewKeyWriterService(repo keyWriterRepository) *KeyWriterService {
 }
 
 func (s *KeyWriterService) InvalidateTunnel() error {
+	if inv, ok := s.repo.(tunnelInvalidator); ok {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return inv.InvalidateTunnel()
+	}
 	var psk [pskLen]byte
 	defer clear(psk[:])
 	if _, err := rand.Read(psk[:]); err != nil {

@@ -25,6 +25,9 @@ build-netlink:
 build-mikrotik:
 	$(MAKE) build BUILD_TAGS=wireguard_mikrotik
 
+build-macsec:
+	$(MAKE) build BUILD_TAGS=macsec_netlink
+
 build-pqc-only:
 	$(MAKE) build BUILD_TAGS=qkd_none
 
@@ -42,4 +45,4 @@ test-e2e:
 clean:
 	rm -rf $(BUILD_DIR)/*
 
-.PHONY: default build build-netlink build-mikrotik build-pqc-only lint fmt test-e2e clean
+.PHONY: default build build-netlink build-mikrotik build-macsec build-pqc-only lint fmt test-e2e clean

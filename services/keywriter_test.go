@@ -82,3 +82,28 @@ func TestSetPSKIsSerialised(t *testing.T) {
 		t.Errorf("got %d writes, want 8", len(f.writes))
 	}
 }
+
+type invalidatingWriter struct {
+	fakeWriter
+	invalidations int
+}
+
+func (w *invalidatingWriter) InvalidateTunnel() error {
+	w.invalidations++
+	return nil
+}
+
+func TestInvalidateTunnelPrefersTheAdapterHook(t *testing.T) {
+	w := &invalidatingWriter{}
+	s := NewKeyWriterService(w)
+
+	if err := s.InvalidateTunnel(); err != nil {
+		t.Fatalf("InvalidateTunnel: %v", err)
+	}
+	if w.invalidations != 1 {
+		t.Errorf("adapter InvalidateTunnel called %d times, want 1", w.invalidations)
+	}
+	if len(w.writes) != 0 {
+		t.Errorf("got %d random-PSK writes, want none when the adapter invalidates itself", len(w.writes))
+	}
+}
